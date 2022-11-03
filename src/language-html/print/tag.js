@@ -19,6 +19,8 @@ const {
   shouldPreserveContent,
   isVueSfcBlock,
 } = require("../utils/index.js");
+const {isPreviousLineEmpty} = require("../../common/util");
+const {concat} = require("../../document/doc-builders");
 
 function printClosingTag(node, options) {
   return [
@@ -213,6 +215,7 @@ function needsToBorrowParentOpeningTagEndMarker(node) {
 
 function printAttributes(path, options, print) {
   const node = path.getValue();
+  const { originalText, locStart } = options;
 
   if (!isNonEmptyArray(node.attrs)) {
     return node.isSelfClosing
@@ -236,15 +239,6 @@ function printAttributes(path, options, print) {
       ? (attribute) => ignoreAttributeData.includes(attribute.rawName)
       : () => false;
 
-  const printedAttributes = path.map((attributePath) => {
-    const attribute = attributePath.getValue();
-    return hasPrettierIgnoreAttribute(attribute)
-      ? replaceTextEndOfLine(
-          options.originalText.slice(locStart(attribute), locEnd(attribute))
-        )
-      : print();
-  }, "attrs");
-
   const forceNotToBreakAttrContent =
     node.type === "element" &&
     node.fullName === "script" &&
@@ -258,11 +252,41 @@ function printAttributes(path, options, print) {
     !isVueSfcBlock(node, options);
   const attributeLine = shouldPrintAttributePerLine ? hardline : line;
 
+  const attributes = path.map((attributePath) => {
+    const value = attributePath.getValue();
+
+    return {
+      value,
+      printed: hasPrettierIgnoreAttribute(value)
+        ? replaceTextEndOfLine(
+          options.originalText.slice(locStart(value), locEnd(value))
+        )
+        : print()
+    };
+  }, "attrs");
+
+  // TODO: Fix tests
+  const printedAttributes = [];
+  for (let i = 0; i < attributes.length; i++) {
+    const { value, printed } = attributes[i];
+    if (i !== 0) {
+      printedAttributes.push(attributeLine);
+
+      if (isPreviousLineEmpty(originalText, value, locStart)) {
+        // TODO: This can lead to two spaces in some cases
+        printedAttributes.push(line);
+      }
+    }
+
+    printedAttributes.push(printed);
+  }
+
   /** @type {Doc[]} */
   const parts = [
     indent([
       forceNotToBreakAttrContent ? " " : line,
-      join(attributeLine, printedAttributes),
+      // eslint-disable-next-line prettier-internal-rules/no-doc-builder-concat
+      concat(printedAttributes),
     ]),
   ];
 
